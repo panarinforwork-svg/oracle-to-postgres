@@ -1,0 +1,160 @@
+# Database Migration: Oracle → PostgreSQL
+
+Инструкция по запуску и настройке миграции базы данных с Oracle на PostgreSQL с использованием Docker и `ora2pg`.
+
+---
+
+```bash
+docker compose up -d
+```
+
+---
+
+## 🗄️ Oracle Database
+
+### 1. Подключение к контейнеру
+```bash
+docker exec -it oracle_cmop bash
+```
+
+### 2. Импорт дампа
+```bash
+imp system/oracle@//localhost:1521/ORCLPDB1 \
+  file=/opt/oracle/dump/cmop.dmp \
+  fromuser=CMOP \
+  touser=CMOP \
+  rows=n \
+  ignore=n \
+  log=/opt/oracle/dump/manual_import.log
+```
+
+### 3. Проверка невалидных пакетов
+```sql
+-- Подключение к БД
+sqlplus system/oracle@ORCLPDB1
+
+-- Запрос на поиск невалидных объектов
+SELECT owner, object_name, object_type 
+FROM dba_objects 
+WHERE status = 'INVALID' 
+  AND object_type IN ('PACKAGE BODY') 
+ORDER BY owner, object_type, object_name;
+```
+
+> ⚠️ **Внимание**: Перекомпиляция пакетов не помогает устранить ошибки.
+
+📄 Логи импорта: `./dump/manual_import.log`
+
+---
+
+## 🐘 PostgreSQL Database
+
+### Установка расширения Orafce
+
+Для совместимости с функциями Oracle необходимо установить расширение `orafce`:
+
+```bash
+# 1. Подключение к контейнеру
+docker exec -it postgres-db-oracle bash
+
+# 2. Обновление пакетов
+apt-get update
+
+# 3. Установка orafce (для PostgreSQL 18)
+apt-get install -y postgresql-18-orafce
+
+# 4. Подключение к psql
+psql -U postgres -d postgres
+
+# 5. Создание расширения
+CREATE EXTENSION IF NOT EXISTS orafce;
+
+# 6. Проверка работы функции
+SELECT oracle.add_months('2005-05-31'::timestamp, 1);
+```
+
+**Ожидаемый результат:**
+```
+     add_months      
+---------------------
+ 2005-06-30 00:00:00
+(1 row)
+```
+
+```sql
+-- 7. Создание пользователя для миграции
+CREATE USER CMOP;
+```
+
+---
+
+## 🔄 Ora2Pg: Настройка и запуск
+
+### 1. Подключение к контейнеру
+```bash
+docker exec -it ora2pg bash
+```
+
+### 2. Инициализация проекта миграции
+```bash
+ora2pg --project_base /data --init_project migration
+```
+
+### 3. Замена конфигурационного файла
+Локально замените сгенерированный конфиг:
+```
+./data/migration/config/ora2pg.conf → ./ora2pg.conf
+```
+
+### 4. Генерация DDL-скриптов
+```bash
+# Внутри контейнера ora2pg
+cd data/migration
+./export_schema.sh
+```
+
+---
+
+## ⚙️ Важные настройки `ora2pg.conf`
+
+| Параметр | Значение | Описание |
+|----------|----------|----------|
+| `COMPILE_SCHEMA` | `1` | Включить компиляцию схемы |
+| `PACKAGE_AS_SCHEMA` | `1` | Каждый пакет Oracle становится отдельной схемой в PostgreSQL |
+| `STOP_ON_ERROR` | `0` | Продолжать работу при ошибках |
+
+### Маппинг типов данных
+
+```ini
+DATA_TYPE   XMLTYPE:xml
+DATA_TYPE   ROWID:bigint
+DATA_TYPE   UROWID:varchar(4000)
+DATA_TYPE   BLOB:bytea
+DATA_TYPE   CLOB:text
+DATA_TYPE   NUMBER:numeric
+DATA_TYPE   VARCHAR2:VARCHAR
+```
+
+---
+
+## 📁 Структура проекта
+
+```
+.
+├── docker-compose.yml
+├── ora2pg.conf          # Конфигурация миграции
+├── dump/
+│   ├── cmop.dmp         # Дамп Oracle
+│   └── manual_import.log # Логи импорта
+├── data/
+│   └── migration/       # Проект ora2pg
+│       ├── config/
+│       ├── schema/      # Сгенерированные SQL-скрипты
+│       └── export.sh    # Скрипт экспорта
+├── ora2pg               # Образ ora2pg
+└── README.md
+```
+
+---
+
+> 📌 **Примечание**: Данная инструкция актуальна для среды разработки. Для продакшена рекомендуется дополнительно настроить бэкапы, мониторинг и параметр `STOP_ON_ERROR`.

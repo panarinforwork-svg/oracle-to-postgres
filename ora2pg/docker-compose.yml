@@ -1,0 +1,24 @@
+version: '3'
+services:
+
+  ora2pg:
+    build:
+      context: .
+#    image: georgmoser/ora2pg
+    container_name: ora2pg
+    network_mode: "host"
+    volumes:
+      - ora2pg-data:/data
+      - ./config:/config
+    environment:
+      - CONFIG_LOCATION=config/ora2pg.conf
+    command: >
+      sh -c "
+        ora2pg -c /config/ora2pg.conf -t SHOW_REPORT > /data/report_output.txt 2>&1 &&
+        echo 'Report generated. Container will stay alive for debugging.' &&
+        tail -f /dev/null
+      "
+
+
+volumes:
+  ora2pg-data:

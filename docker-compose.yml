@@ -1,0 +1,71 @@
+services:
+  oracle:
+    image: oracle
+    container_name: oracle_cmop
+    ports:
+      - "1521:1521"
+    environment:
+      - ORACLE_SID=ORCLCDB
+      - ORACLE_PDB=ORCLPDB1
+      # Не забыть поменять пароль внутри контейнера
+      - ORACLE_PWD=Oracle_123
+      - ORACLE_CHARACTERSET=AL32UTF8
+    volumes:
+      - oracle_data:/opt/oracle/oradata
+      - ./dump:/opt/oracle/dump
+    networks:
+      - migration_network
+    healthcheck:
+      test: ["CMD", "sqlplus", "-L", "/ as sysdba", "@healthcheck.sql"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  postgres:
+    image: postgres:18  # или postgres:18-bookworm
+    container_name: postgres-db-oracle
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      LANG: en_US.utf8
+      LC_ALL: en_US.utf8
+      LC_CTYPE: en_US.utf8
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.utf8"
+    volumes:
+      - ./data/oracle_to_postgres:/sql-scripts:ro
+    ports:
+      - "6543:5432"
+    networks:
+      - migration_network
+      
+
+  ora2pg:
+    container_name: ora2pg
+    image: ora2pg3
+    build:
+      context: ./ora2pg
+      dockerfile: Dockerfile
+    environment:
+      ORA_HOST: "dbi:Oracle:host=oracle_cmop;service_name=ORCLPDB1;port=1521"
+      ORA_USER: "system"
+      ORA_PWD: "oracle"
+      CONFIG_LOCATION: "/config/ora2pg.conf"
+      OUTPUT_LOCATION: "./data"
+    volumes:
+      - ./ora2pg/config:/config
+      - ./data:/data
+    networks:
+      - migration_network
+    depends_on:
+      oracle:
+        condition: service_healthy
+
+volumes:
+  oracle_data:
+    driver: local
+  postgres_data:
+
+networks:
+  migration_network:
+    driver: bridge
