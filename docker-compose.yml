@@ -1,6 +1,6 @@
 services:
   oracle:
-    image: oracle
+    image: bs-nexus-proj.ftc.ru:8011/oracle/database:12.2.0.1-ee-p30138470
     container_name: oracle_cmop
     ports:
       - "1521:1521"
